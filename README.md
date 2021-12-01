@@ -33,3 +33,11 @@ Below is the code:
 // I'm cheap so I only gave it 1 token, but it works :)
 await this.token.transfer(this.pool.address, 1, );
 ```
+
+2. Naive Receiver
+
+There's a lending pool offering expensive flashloan, and there's another contract capable of interacting with the flashloan pool. The pool has 1000 ETH in balance, and the other contract has 10 ETH. The goal is to drain the 10ETH in the contract and transfer them to the pool. 
+
+By looking at the pool contract, I realized that the fee, which equals 1 ETH, is incredibly high. The brute force way to solve this challenge would be invoking the `flashloan` function 10 times. However, the challenge did encourage stealing the fund in one single transaction, therefore there must be better ways. 
+
+To achieve the same goal, I can deploy a attacker contract that invoke the `flashLoan` contract 10 times with victim's address as the argument. Then, in the test, I could just deploy this contract and invoke the function that interacts with the flashloan contract. 
