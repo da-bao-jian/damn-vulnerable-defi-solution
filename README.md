@@ -31,14 +31,11 @@ DO NOT USE IN PRODUCTION.
   looks suspicious. `poolBalance` is a state variable only modified inside of `depositTokens()`, but `balanceBefore` is a dynamic value that tracks the contract's token balance. If I can increase/decrease the contract's balance, I should be able to put `poolBalance` out of sync with `balanceBefore`. Conviniently, ERC20 token has `transfer()` method that I increase the contract balance while keeping `poolBalance` unchanged. 
 
   Below is the code:
-  ```
-  // I'm cheap so I only gave it 1 token, but it works :)
-  await this.token.transfer(this.pool.address, 1, );
 ```
-<<<<<<< HEAD
 // I'm cheap so I only gave it 1 token, but it works :)
 await this.token.transfer(this.pool.address, 1, );
 ```
+
 
 2. Naive Receiver
 
@@ -47,5 +44,5 @@ There's a lending pool offering expensive flashloan, and there's another contrac
 By looking at the pool contract, I realized that the fee, which equals 1 ETH, is incredibly high. The brute force way to solve this challenge would be invoking the `flashloan` function 10 times. However, the challenge did encourage stealing the fund in one single transaction, therefore there must be better ways. 
 
 To achieve the same goal, I can deploy a attacker contract that invoke the `flashLoan` contract 10 times with victim's address as the argument. Then, in the test, I could just deploy this contract and invoke the function that interacts with the flashloan contract. 
-=======
->>>>>>> e297bec60a1d1a8066d2abba41372d1f5042df86
+
+![naive receiver](https://github.com/da-bao-jian/damn-vulnerable-defi-solution/blob/master/pic/Screenshot%20from%202021-12-01%2001-31-34.png)
