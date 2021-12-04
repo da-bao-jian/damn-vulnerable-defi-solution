@@ -111,3 +111,22 @@ Below is my thought process:
 - Lastly, we would need to make sure at 1 days
 
 The full implementation is here. 
+
+6. Selfie
+
+This challenge is somewhat similar to the last one, but therer's one more layer to it. We need to deploy a contract that's called by the flash loan contract to interact with a third contract. 
+
+The challenge has two contracts: `SelfiePool` and `SimpleGovernance`. `SelfiePool` provides flash loan and `SimpleGovernance` provides strerotypical governance token mechanisms. The goal of this challenge is to steal all of the fund on the `SelfiePool` contract. 
+
+A quick search of two contracts should reveal that there's a function called `drainAllFunds()` looks suspicious. Isn't this is exactly what we want? However, it is conditioned by a modifier named `onlyGovernance`, which indicates that it can only be invoked by the `SimpleGovernance` contract. Then, the next step is to figure out how to take control of the governance contract. 
+
+Function `executeAction()` provides a low level call through OpenZeppelin's `functionCallWithValue()` medthod. However, the calldata portion of the method can only provided by function `queueAction()`. Therefore, we need to figure out how to invoke `queueAction()`. Good new is to invoke `queueAction()`, one only needs to pass `_hasEnoughVote()` method, which checks an account's token balance agaisnt half of total supply. How are we going to get prefill the account with enough token? FlashLoan! 
+
+To solve this challenge, we first write the `receiveTokens()` method that will be called by the `flashLoan()` method. In `receiveTokens()`, we do three things:
+- invoke the DamnVulnerableTokenSnapshot's `snapshot()` method to give `lastSnapshot` a value;
+- then, we call the `queueAction` method to fill calldata, which encodes a function call to `drainAllFunds()`
+- return the flashloan. 
+
+Eventually, we can invoke the `executeAction()` to drain the fund. 
+
+The full implementation is here. 

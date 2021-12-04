@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "../DamnValuableTokenSnapshot.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
+import "hardhat/console.sol";
 
 /**
  * @title SimpleGovernance
@@ -86,7 +87,9 @@ contract SimpleGovernance {
     
     function _hasEnoughVotes(address account) private view returns (bool) {
         uint256 balance = governanceToken.getBalanceAtLastSnapshot(account);
+        console.log(balance);
         uint256 halfTotalSupply = governanceToken.getTotalSupplyAtLastSnapshot() / 2;
+        console.log(halfTotalSupply);
         return balance > halfTotalSupply;
     }
 }
