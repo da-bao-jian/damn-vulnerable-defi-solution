@@ -134,4 +134,4 @@ To solve this challenge, we first write the `receiveTokens()` method that will b
 
 Eventually, we can invoke the `executeAction()` to drain the fund. 
 
-The full implementation is here. 
+The full implementation is [here](https://github.com/da-bao-jian/damn-vulnerable-defi-solution/blob/master/contracts/selfie/attacker.sol)
