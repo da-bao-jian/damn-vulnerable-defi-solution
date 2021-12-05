@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "./TrustfulOracle.sol";
 import "../DamnValuableNFT.sol";
+import "hardhat/console.sol";
 
 /**
  * @title Exchange

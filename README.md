@@ -135,3 +135,65 @@ To solve this challenge, we first write the `receiveTokens()` method that will b
 Eventually, we can invoke the `executeAction()` to drain the fund. 
 
 The full implementation is here. 
+
+7. Compromised
+
+This was a hard one for me as I've don't have any formal conputer science trainings. Took me quite a while to figure out what those numbers were. 
+
+The challenge provides an exchange that one can use to buy/sell NFT, and NFT's price is queried from an oracle contract. The goal is to steal all of the funds on the exchange contract. Additionally, the chellenge also provides two hex data without explicit explanations. 
+
+Since the goal is to steal funds, let's see how exchange contract interacts with others. It has two functions: `buyOne()` and `sellOne()`. `buyOne()` queries the oracle contract to receive the  buying price, and `sellOne()` does the same for getting the selling price. Other than the oracle contract, both also interact with `msg.sender` to receive and transfer funds. My guess is the solution should use one of them to siphon off the fund. `sellOne()` seems more fitting to our purpose as it transfer out the funds on the contract to the `msg.sender`. Dive deeper, I realized that the value sent to `msg.sender` is determined by the `currentPriceinWei` variable, which is the price feed queried from the oracle contract. Therefore, to change the value of `currentPriceinWei`, I need to manipulate the oracle contract. 
+
+Looking at the oracle contract's functions that the exchange contract interacts with, function `getMedianPrice()` directly affect the value of `currentPriceinWei`. Flattening out the `getMedianPrice())`, it serves to provide the median value of three existing NFT prices. In the process, it utilizes the value provided by `pricesBySource[source][symbol]`, which returns the price given a source(address of the `TRUSTED_SOURCE_ROLE`) and a token symbol(in our case, `DVNFT`). This is the value we want! The oracle contract convinient provides a method named `postPrice()` to modify the state of `pricesBySource` . However, `postPrice()` can only be called by any one of the `TRUSTED_SOURCE_ROLE`. In the current challenge, they are the three addresses provided in the test: 
+- '0xA73209FB1a42495120166736362A1DfA9F95A105',
+- '0xe92401A4d3af5E446d93D11EEc806b1462b39D15',
+- '0x81A5D6E50C214044bE44cA0CB057fe119097850c'
+
+My guess is, there's gotta be a way to get access to these addresses. To sign off transactions on EVM, one needs an EOA's private key to sign the keccak-256 hash of the RLP serialized tx data, of which the result is a signature:
+
+- signature = F(keccak256(messgae), privateKey), where F is the signing algo
+* detail can be found [here](https://github.com/ethereumbook/ethereumbook/blob/develop/06transactions.asciidoc)
+
+Therefore, my guess is the hex data could be related to private keys. However, private key is a 32 byte hexadecimal value, which is different from what's given in the challenge. Puting the hex into google, many results indicate that it could be utf-8 encoded. Javascript provides a convinient method to decode it, and the results are:
+- MHhjNjc4ZWYxYWE0NTZkYTY1YzZmYzU4NjFkNDQ4OTJjZGZhYzBjNmM4YzI1NjBiZjBjOWZiY2RhZTJmNDczNWE5
+- MHgyMDgyNDJjNDBhY2RmYTllZDg4OWU2ODVjMjM1NDdhY2JlZDliZWZjNjAzNzFlOTg3NWZiY2Q3MzYzNDBiYjQ4
+
+The next took me a little while to crack. The above two strings are base64, which can be converted to hex data. The conversion gives us:
+- 0xc678ef1aa456da65c6fc5861d44892cdfac0c6c8c2560bf0c9fbcdae2f4735a9
+- 0x208242c40acdfa9ed889e685c23547acbed9befc60371e9875fbcd736340bb48 
+
+With private key, we can use public key recovery method to get the public key, we can hash the public and take the first 20 bytes, which will be the address assocaited with the private key. If the the address matches one of the three `TRUSTED_SOURCE_ROLES`, that means they are indeed the private keys. If that's the case, we can sign off transaction "on behalf" of them. It turns out they are the private keys of two of the `TRUSTED_SOURCE_ROLES`. Now, the hardest part is done. 
+
+```
+// load two private keys
+let {privateKey1, privateKey2} = require("./decoder");
+
+//create new wallets
+let wallet1 = new ethers.Wallet(privateKey1, attacker.provider);
+let wallet2 = new ethers.Wallet(privateKey2, attacker.provider);
+
+// attack function 
+let attack = async () => {
+    await this.oracle.connect(wallet1).postPrice("DVNFT", ethers.utils.parseUnits('0', 'wei'));
+    await this.oracle.connect(wallet2).postPrice("DVNFT", ethers.utils.parseUnits('0', 'wei'));
+
+    // await this.oracle.getMedianPrice("DVNFT")
+    // buy one with lowered price median
+    await this.exchange.connect(attacker).buyOne({value: 1});
+
+    // elevate the median price back 
+    await this.oracle.connect(wallet1).postPrice("DVNFT", EXCHANGE_INITIAL_ETH_BALANCE);
+    await this.oracle.connect(wallet2).postPrice("DVNFT", EXCHANGE_INITIAL_ETH_BALANCE);
+
+    // approve transaction
+    await this.nftToken.connect(attacker).approve(this.exchange.address, 0);
+    await this.exchange.connect(attacker).sellOne(0);
+
+    // restore the NFT price to previous level
+    await this.oracle.connect(wallet1).postPrice("DVNFT", INITIAL_NFT_PRICE);
+    await this.oracle.connect(wallet2).postPrice("DVNFT", INITIAL_NFT_PRICE);
+
+}
+
+await attack();
+```
