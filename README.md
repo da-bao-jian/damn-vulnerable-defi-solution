@@ -260,3 +260,36 @@ await this.weth.connect(attacker).approve(this.lendingPool.address, collateralIn
 // get all of the token in the poool
 await this.lendingPool.connect(attacker).borrow(POOL_INITIAL_TOKEN_BALANCE); 
 ```
+10. Free rider
+
+This challenge asks to steal NFTs for a buyer. The buyer would pay 45 ETH for whoever is willing to take the NFT out from a NFT marketplace. The challenger is seeded with only 0.5 ETH, and a Uniswap pool is provided. The challenge also hinted that it would be helpful to get free ETH, even for an instant.  
+
+To approach this, I thought about using flash loan, however, the two available contracts do not provide flash loan functionalities. A quick Google search revealed that Uniswap has its own version of flash loan - flash swap. 
+
+Accoring to Uniswap's Doc, 
+
+```
+Uniswap flash swaps allow you to withdraw up to the full reserves of any ERC20 token on Uniswap and execute arbitrary logic at no upfront cost, provided that by the end of the transaction you either:
+
+- pay for the withdrawn ERC20 tokens with the corresponding pair tokens
+- return the withdrawn ERC20 tokens along with a small fee
+```
+
+To use flash swap, Uniswap provides the function `swap()`. 
+
+Now, we have the capital required, let's dive into the challenge. The challenge has two contracts: `FreeRiderBuyer` and `FreeRiderNFTMarketplace`. `FreeRiderBuyer` does only one thing, which is to transfer the bounty from the buyer. Therefore, my guess is the exploitable code should live in `FreeRiderNFTMarketplace`. The `FreeRiderNFTMarketplace` does two things, buy and sell NFTs in batch. The buy functions are called in the initial setup of the test, where 6 `DamnValuableNFT` were put up for sale. To get the NFTs, I need to use the `buyMany()` function. A quick examination revealed a critical flaw in its design:
+- `buyMany()` function uses a helper function named `_buyOne()` to process individual purchases;
+- `_buyOne()` checks the `msg.value` when an external actor calls the `buyMany()` function, but it compares the `msg.value` against the unit price of a NFT. For instance, if one wants to buy all 6 of `DamnValuableNFT`, he/she needs to send 90ETH. But because `_buyOne()` only checks `msg.value` against the uni price of a NFT, one only needs to send 15ETH to receive all 6 of `DmnValuableNFT`;
+- Additionally, because `_buyOne()` also pays the seller from the balance of the `FreeRiderNFTMarketplace` contract, any purchase would decrease the balance of the contract. If one buys all 6 of the NFTs, it would reduce the contract balance to zero since `FreeRiderNFTMarketplace` was seeded with 90ETH in balance. 
+
+An attack vector could be carried out as such: 
+- implement the `IUniswapV2Callee` interface for the attacking contract;
+- in the `uniswapV2Call()` function:
+  - use flash swap to get 15 WETH;
+  - unwrap WETH to ETH and call the `buyMany()` method;
+  - wrap ETH back to WETH and return to the borrowed amount including the fees;
+- send the received NFT to the buyer. 
+
+`uniswapV2Call()` function belongs to the `IUniswapV2Callee` interface, which would be invoked indirectly by the `swap()` function. 
+
+Again, DON'T FORGET TO ADD `receive()` function in your attacking contract.
