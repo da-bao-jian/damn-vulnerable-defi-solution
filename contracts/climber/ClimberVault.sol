@@ -7,6 +7,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "./ClimberTimelock.sol";
+import "hardhat/console.sol";
 
 /**
  * @title ClimberVault

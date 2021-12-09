@@ -292,4 +292,147 @@ An attack vector could be carried out as such:
 
 `uniswapV2Call()` function belongs to the `IUniswapV2Callee` interface, which would be invoked indirectly by the `swap()` function. 
 
-Again, DON'T FORGET TO ADD `receive()` function in your attacking contract.
+Again, DON'T FORGET TO ADD `receive()` function in your attacking contract. 
+
+11. Backdoor
+
+You can read @tinchoabbate's detailed walkthrough of this vulnerability [here](https://blog.openzeppelin.com/backdooring-gnosis-safe-multisig-wallets/)
+
+If you've read all of my previous challenge breakdowns and understood my approach, you should start this challenge by finding the `transfer` function since the goal is to take all of the fund from registry. Once you are able to find the `transfer()` function, you should work your way backward step by step. This should lead you to this line:
+```
+address payable walletAddress = payable(proxy);
+```
+To steal all of the fund, we need to be able to change the `walletAddress` to our attack contract's address. To do so we need to figure out what's `proxy`?
+
+It's the first argument of the `proxyCreated()` function, and an instance of `GnosisSafeProxy`. According to the comment, `proxyCreated()` will be executed when one creates a new wallet via the `createProxyWithCallback()` method. The next logical step is to find out what does `createProxyWithCallback()` do and how we can tinker around it to modify `proxy`. Here's its implementation: 
+```
+/// @dev Allows to create new proxy contact, execute a message call to the new proxy and call a specified callback within one transaction
+/// @param _singleton Address of singleton contract.
+/// @param initializer Payload for message call sent to new proxy contract.
+/// @param saltNonce Nonce that will be used to generate the salt to calculate the address of the new proxy contract.
+/// @param callback Callback that will be invoced after the new proxy contract has been successfully deployed and initialized.
+
+function createProxyWithCallback(
+    address _singleton,
+    bytes memory initializer,
+    uint256 saltNonce,
+    IProxyCreationCallback callback
+) public returns (GnosisSafeProxy proxy) {
+    uint256 saltNonceWithCallback = uint256(keccak256(abi.encodePacked(saltNonce, callback)));
+    proxy = createProxyWithNonce(_singleton, initializer, saltNonceWithCallback);
+    if (address(callback) != address(0)) callback.proxyCreated(proxy, _singleton, initializer, saltNonc);
+}
+```
+
+`proxy` is the variable we need to modify. To do so, we need to trace up to the function where `proxy` was calculated. This should lead to the `deployProxyWithNonce()` function in the `GnosisSafeProxyFactory` contract. Here's its implementation: 
+```
+function deployProxyWithNonce(
+    address _singleton,
+    bytes memory initializer,
+    uint256 saltNonce
+) internal returns (GnosisSafeProxy proxy) {
+    // If the initializer changes the proxy address should change too. Hashing the initializer data is cheaper than just concatinating it
+    bytes32 salt = keccak256(abi.encodePacked(keccak256(initializer), saltNonce));
+    bytes memory deploymentData = abi.encodePacked(type(GnosisSafeProxy).creationCode, uint256(uint160(_singleton)));
+    // solhint-disable-next-line no-inline-assembly
+    assembly {
+        proxy := create2(0x0, add(0x20, deploymentData), mload(deploymentData), salt)
+    }
+    require(address(proxy) != address(0), "Create2 call failed");
+}
+```
+We can see that `proxy` is created via the `CREATE2` opcode. The difference between `CREATE1` and `CREATE2` is that when deploying a contract using `CREATE2`, it includes a hash of the bytecode being deployed and a randome `salt` provided by the deployer. It looks like this:
+```
+keccak256(0xff ++ deployingAddress ++ salt ++ keccak256(bytecode))[12:]
+``` 
+where 
+- `0xff` is used to prevent hash collision with `CREATE`;
+- `deployingAddress` is the sender's address;
+- `salt` is the arbitrary value provided by the sender;
+- `keccak256(bytecode)` is the contract's bytecode;
+- `[12:]` first 12 bytes are removed. 
+
+By comparison, `CREATE` would look like this:
+```
+keccak256(rlp.encode(deployingAddress, nonce))[12:]
+```
+where
+- `deployingAddress` is the sender's address;
+- `nonce` a sequential number to keep a track of number of contracts created.
+
+`CREATE2` allows depoloyer to pre-compute the contract address. The benefit of it is that an address could be generated without deployment, which opens the possibility of scalability and better user onboarding experience. 
+
+Back to the challenge. We can see that `proxy` variable depends on `create2(0x0, add(0x20, deploymentData), mload(deploymentData), salt)`. The for arguments are:
+- `0x0`: amount of wei sent to the new contract;
+- `add(0x20, deploymentData), mload(deploymentData)` location of the bytecode in memory;
+- `salt` an arbitrary 32 bytes value. 
+
+Here, since `type(GnosisSafeProxy).creationCode` and `_singleton` are fixed, we don't need to worry about `deploymentData`. Let's take a look at how `salt` is generated. 
+```
+bytes32 salt = keccak256(abi.encodePacked(keccak256(initializer), saltNonce));
+```
+`salt` is generated by a hash of hashed `initializer` and `saltNonce`, where the `initializer` should be the `setup()` function in `GnosisSafe` contract
+```
+function setup(
+    address[] calldata _owners,
+    uint256 _threshold,
+    address to,
+    bytes calldata data,
+    address fallbackHandler,
+    address paymentToken,
+    uint256 payment,
+    address payable paymentReceiver
+) external {
+    // setupOwners checks if the Threshold is already set, therefore preventing that this method is called twice
+    setupOwners(_owners, _threshold);
+    if (fallbackHandler != address(0)) internalSetFallbackHandler(fallbackHandler);
+    // As setupOwners can only be called if the contract has not been initialized we don't need a check for setupModules
+    setupModules(to, data);
+
+    if (payment > 0) {
+        // To avoid running into issues with EIP-170 we reuse the handlePayment function (to avoid adjusting code of that has been verified we do not adjust the method itself)
+        // baseGas = 0, gasPrice = 1 and gas = payment => amount = (payment + 0) * 1 = payment
+        handlePayment(payment, 0, 1, paymentToken, paymentReceiver);
+    }
+    emit SafeSetup(msg.sender, _owners, _threshold, to, fallbackHandler);
+  }
+```
+and `saltNonce` should be
+```
+// saltUint256 is the address of users casted into an unit256 
+uint256 saltNonce = uint256(keccak256(abi.encodePacked(saltUin256, callback)));
+```
+
+Therefore, in order to modify `proxy`, we need to modify `initializer` and `saltNonce` accordingly. Looking at the `setup()` function, there are a few parameters we could tweak to fit our need:
+- change `_owners` to existing owners, namely, Alice, Bob, Charlie, David;
+- change `to` to the deployed attacking contract';
+- change `data` to execute a `delegatecall` to whatever address is passed. 
+
+Because we want to transfer token to proxy, we should encode an ERC20 style `approve()` function approving attacking contract's address as the `data` parameter. 
+
+If you receive errors saying "Error: Transaction reverted without a reason string", it's very likely you ran out of gas because of this line in the `GnosisSafeProxyFactory`:
+```
+if eq(call(gas(), proxy, 0, add(initializer, 0x20), mload(initializer), 0, 0), 0) {
+    revert(0, 0)
+}
+```
+If that's the case, try declaring variables as `immutable`. 
+
+12. Climber
+
+If you followed my previous approches, you should be looking at `sweepFunds()` function in the `ClimberValut` contract. However, `sweepFunds()` can only be called by `sweeper`, which is priviledged role initialized in the `initializer()` function. Because `ClimberVault` uses a `initializer()` function and an empty constructor, we can tell that it follows the [UUPS](https://eips.ethereum.org/EIPS/eip-1822) pattern. Which means, we might be able to upgrade the contract through a proxy contract. 
+
+There are many details need to be followed when writing upgradable contracts. For instance, constructor should not be used since the code within will never be executed in the context of a proxy contract's state. Additionally, field declaration should be avoided as this is equivalent to declaring them in a constructor unless they are defined as `constant` state variable.
+
+For `ClimberVault`, we can see that it inherits from OpenZepplin's `UUPSUpgradeable` contract, which includes a `virtual` function named `_authorizeUpgrade()`. Here, `ClimberVault` also has a function named `_authorizeUpgrade()` that should be overriding the same function from `UUPSUpgradeable`. The only issue is, it has `onlyOwner` modifier. The current owner is the `ClimberTimelock` contract. Therefore, we need to take control of `ClimberTimelock`. Good news is `ClimberTimelock` inherits `AccessControl`, and in the constructor `ClimberTimelock` is a self admin. In other words, we can call `AccessControl.grantRole()` to the attacking contract. 
+
+To interact with the upgraded contract, we can use the `execute()` method in the `ClimberTimelock`, which execute three arrays of sequential calls. These arrays are filled by calling the `schedule()` function. There's a hard coded `delay` to execute scheduled calls, but since we are the `PROSER_ROLE` now we can use the `updateDelay` to change it to zero. After that, we can change the `sweepFunds()` function to fit our need, namely deleting the modifier and change the transfer address to ourselves.
+
+To execute the exploit, in the attack contract, we need to do the following:
+- change the proser_role of the climbertimelock contract
+- change delay time
+- upgrade logic contract from proxy
+- schedule all the sequential calls 
+- execute the sequential call
+
+
