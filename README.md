@@ -15,6 +15,6 @@ All Solidity code, practices and patterns in this repository are DAMN VULNERABLE
 
 DO NOT USE IN PRODUCTION.
 
-
-## [Writeup](https://dabaojian.medium.com/solutions-to-the-latest-update-of-damn-vulnerable-defi-70a7f4af6986) of my solutions 
+## Solution 
+[Writeup](https://dabaojian.medium.com/solutions-to-the-latest-update-of-damn-vulnerable-defi-70a7f4af6986) of my solutions 
 
