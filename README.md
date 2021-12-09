@@ -1,6 +1,6 @@
 ![](cover.png)
 
-[Damn Vulnerable Defi](damnvulnerabledefi.xyz/)
+[Damn Vulnerable Defi](https://github.com/OpenZeppelin/damn-vulnerable-defi)
 
 **A set of challenges to hack implementations of DeFi in Ethereum.**
 
